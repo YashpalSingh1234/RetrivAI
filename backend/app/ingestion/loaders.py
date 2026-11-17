@@ -44,4 +44,16 @@ def load_pdf(file_path:str) -> dict:
                  if text:
                      full_txt.append(text)
 
-    except
+    except (FileNotFoundError, ValueError):
+        raise
+
+    except Exception as exc:
+        raise RuntimeError("Failed to read the pdf.") from exc
+
+
+    return {
+        "filename" : path.name,
+        "total_page" : len(pages),
+        "text" : "\n\n".join(full_txt),
+        "pages" : pages,
+    }
