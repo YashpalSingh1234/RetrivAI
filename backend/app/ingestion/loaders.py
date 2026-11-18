@@ -14,11 +14,11 @@ def load_pdf(file_path:str) -> dict:
     if not path.exists():
         raise FileNotFoundError()
 
-    if not path.isfile():
+    if not path.is_file():
         raise ValueError("Provided path is not a file")
-
-    if path.suffix.lower() != "pdf":
-        raise ValueError("Only pdf file are asupported")
+    
+    if path.suffix.lower() != ".pdf":
+        raise ValueError("Only pdf file are supported")
 
 
     pages= []
