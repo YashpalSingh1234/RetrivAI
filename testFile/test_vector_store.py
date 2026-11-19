@@ -10,14 +10,14 @@ PDF_PATH = r"testdata\Big_Data_Basics_Complete_Study_Notes.pdf"
 
 # 1. Load
 document = load_pdf(PDF_PATH)
-
+print(document)
 with open(PDF_PATH, "rb") as file:
-    document["document_id"] = hashlib.file_digest(
-        file, "sha256"
+    document["document_id"] = hashlib.sha256(
+        file.read()
     ).hexdigest()
 
 # 2. Clean
-document = clean_document(document)
+documents = clean_document(document)
 
 # 3. Chunk
 
@@ -26,7 +26,7 @@ chunker = DocumentChunker(
     chunk_overlap=200
 ) 
 
-chunks = chunker.chunk_document(document)
+chunks = chunker.chunk_document(documents)
 
 # 4. Embed
 embedding_service = EmbeddingService()

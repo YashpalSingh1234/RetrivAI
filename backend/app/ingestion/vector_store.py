@@ -6,7 +6,7 @@ import numpy as np
 class VectorStore:
 
     def __init__(self, persist_directory: str = "data/chroma_df", collection_name: str = "rag_documents"):
-        path(persist_directory).mkdir(
+        Path(persist_directory).mkdir(
             parents=True,
             exist_ok=True
         )

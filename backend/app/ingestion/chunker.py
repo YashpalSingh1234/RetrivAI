@@ -20,47 +20,47 @@ class DocumentChunker:
     
 
 
-def chunk_document(self, document: dict) -> list[dict]:
+    def chunk_document(self, document: dict) -> list[dict]:
 
-    chunks = []
+        chunks = []
 
-    document_id = document.get("document_id")
+        document_id = document.get("document_id")
 
-    if not document_id:
-        raise ValueError("document_id is required")
+        if not document_id:
+            raise ValueError("document_id is required")
 
-    for page in document["pages"]:
+        for page in document["pages"]:
 
-        page_number = page["page_number"]
-        text = page["text"]
+            page_number = page["page_number"]
+            text = page["text"]
 
-        if not text.strip():
-            continue
+            if not text.strip():
+                continue
 
-        page_chunks = self.splitter.split_text(text)
+            page_chunks = self.splitter.split_text(text)
 
-        for chunk_index, chunk_text in enumerate(page_chunks):
+            for chunk_index, chunk_text in enumerate(page_chunks):
 
-            chunk_hash = hashlib.sha256(
-                chunk_text.encode("utf-8")
-            ).hexdigest()[:16]
+                chunk_hash = hashlib.sha256(
+                    chunk_text.encode("utf-8")
+                ).hexdigest()[:16]
 
-            chunk_id = (
-                f"{document_id}_p{page_number}"
-                f"_c{chunk_index}_{chunk_hash}"
-            )
+                chunk_id = (
+                    f"{document_id}_p{page_number}"
+                    f"_c{chunk_index}_{chunk_hash}"
+                )
 
-            chunks.append({
-                "chunk_id": chunk_id,
-                "text": chunk_text,
-                "metadata": {
-                    "document_id": document_id,
-                    "source": document["filename"],
-                    "page_number": page_number,
-                    "chunk_index": chunk_index
-                }
-            })
+                chunks.append({
+                    "chunk_id": chunk_id,
+                    "text": chunk_text,
+                    "metadata": {
+                        "document_id": document_id,
+                        "source": document["filename"],
+                        "page_number": page_number,
+                        "chunk_index": chunk_index
+                    }
+                })
 
-    return chunks
+        return chunks
 
 
