@@ -1,0 +1,37 @@
+# Secrets and local configuration
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+RetrivAI_Venv/
+
+# Generated local application data
+data/retrivai.sqlite3
+data/retrivai.sqlite3-shm
+data/retrivai.sqlite3-wal
+data/chroma_df/
+data/chroma_db/
+data/hf_cache/
+uploads/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Operating systems / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

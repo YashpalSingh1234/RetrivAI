@@ -1,0 +1,14 @@
+.git
+.env
+.venv
+venv
+RetrivAI_Venv
+__pycache__
+*.py[cod]
+data
+docs
+frontend
+testFile
+testdata
+node_modules
+.next
