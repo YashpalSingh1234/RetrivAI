@@ -4,7 +4,7 @@ export function SourceCitation({ sources }: { sources: Citation[] }) {
   if (!sources.length) return null;
   return (
     <div className="sources-block">
-      <div className="sources-heading"><span className="sources-rule" /> SOURCES <span className="source-count">{sources.length}</span></div>
+      <div className="sources-heading">Sources <span className="source-count">{sources.length}</span></div>
       <div className="source-grid">
         {sources.map((source) => (
           <details className="source-card" key={`${source.citation_id}-${source.document_id}-${source.chunk_index}`}>

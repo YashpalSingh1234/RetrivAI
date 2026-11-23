@@ -135,7 +135,7 @@ LLM_API_KEY
 LLM_MODEL
 EMBEDDING_MODEL
 DATABASE_URL
-VECTOR_DB_PATH
+EMBEDDING_DIMENSION
 FRONTEND_URL
 BACKEND_URL
 ```
@@ -185,7 +185,7 @@ Categories:
 - Pydantic
 - PDF/DOCX loaders
 - Sentence Transformers
-- Chroma/vector DB
+- PostgreSQL driver for application records and pgvector search
 - Reranker model
 - LLM SDK
 - Testing tools

@@ -44,8 +44,8 @@ export function DocumentList({
     return (
       <div className="empty-state document-empty">
         <span className="empty-icon" aria-hidden="true">▤</span>
-        <strong>Your library is ready for its first document</strong>
-        <span>Once indexed, documents become searchable from the chat.</span>
+        <strong>No documents yet</strong>
+        <span>Upload a file to start asking questions about it.</span>
       </div>
     );
   }
@@ -65,8 +65,8 @@ export function DocumentList({
               {document.status === "failed" && document.error_message && <span className="document-error" title={document.error_message}>{document.error_message}</span>}
             </div>
             <div className={`document-status ${document.status}`}>
-              <span className="status-dot" />
-              {document.status === "ready" ? `${document.chunk_count} passages` : document.status}
+              <span className="status-dot" aria-hidden="true" />
+              {document.status === "ready" ? `Ready · ${document.chunk_count} ${document.chunk_count === 1 ? "passage" : "passages"}` : document.status === "processing" ? "Processing" : "Failed"}
             </div>
             <button
               className="icon-button delete-button"

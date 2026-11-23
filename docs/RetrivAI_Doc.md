@@ -373,7 +373,7 @@ The exact model may be changed after evaluation.
 
 ## Initial Choice
 
-**Chroma**
+**PostgreSQL with pgvector**
 
 Purpose:
 
@@ -842,7 +842,7 @@ content
 created_at
 ```
 
-Vector storage remains separate from relational application metadata if Chroma is used.
+Document passages and embeddings live in PostgreSQL alongside the application metadata and reference their owning document.
 
 ---
 
@@ -856,7 +856,7 @@ Vector storage remains separate from relational application metadata if Chroma i
 | Backend             | FastAPI                    |
 | Backend Language    | Python                     |
 | Embeddings          | Sentence Transformers      |
-| Vector DB           | Chroma                     |
+| Application and vector DB | PostgreSQL + pgvector |
 | Retrieval           | Semantic Similarity Search |
 | Reranking           | Cross-Encoder              |
 | LLM                 | API-based LLM              |

@@ -48,7 +48,7 @@ def create_user(email: str, password: str) -> dict[str, str]:
     }
     with database() as connection:
         connection.execute(
-            "INSERT INTO users(id, email, password_hash, created_at) VALUES(?, ?, ?, ?)",
+            "INSERT INTO users(id, email, password_hash, created_at) VALUES(%s, %s, %s, %s)",
             (user["id"], user["email"], hash_password(password), user["created_at"]),
         )
     return user
@@ -57,7 +57,7 @@ def create_user(email: str, password: str) -> dict[str, str]:
 def authenticate_user(email: str, password: str) -> dict[str, str] | None:
     with database() as connection:
         row = connection.execute(
-            "SELECT id, email, password_hash, created_at FROM users WHERE email = ?",
+            "SELECT id, email, password_hash, created_at FROM users WHERE email = %s",
             (email.strip().lower(),),
         ).fetchone()
     if row is None or not verify_password(password, row["password_hash"]):
@@ -68,7 +68,7 @@ def authenticate_user(email: str, password: str) -> dict[str, str] | None:
 def get_user(user_id: str) -> dict[str, str] | None:
     with database() as connection:
         row = connection.execute(
-            "SELECT id, email, created_at FROM users WHERE id = ?", (user_id,)
+            "SELECT id, email, created_at FROM users WHERE id = %s", (user_id,)
         ).fetchone()
     return dict(row) if row else None
 

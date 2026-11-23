@@ -18,6 +18,7 @@ data/retrivai.sqlite3-shm
 data/retrivai.sqlite3-wal
 data/chroma_df/
 data/chroma_db/
+data/postgres_local/
 data/hf_cache/
 uploads/
 

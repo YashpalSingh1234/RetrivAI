@@ -81,7 +81,6 @@ async def request_observability(request: Request, call_next):
 @app.on_event("startup")
 def startup() -> None:
     initialize_database()
-    settings.vector_db_path.mkdir(parents=True, exist_ok=True)
 
 
 @app.get("/", include_in_schema=False)

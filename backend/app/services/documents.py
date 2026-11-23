@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import sqlite3
 import time
 from typing import Any
 
 from backend.app.core.config import settings
 from backend.app.core.database import database, utc_now
-from backend.app.core.services import get_embedding_service, get_vector_store
 from backend.app.core.security import validate_uploaded_file
+from backend.app.core.services import get_embedding_service, get_vector_store
 from backend.app.ingestion.chunker import DocumentChunker
 from backend.app.ingestion.cleaner import clean_document
 from backend.app.ingestion.loaders import load_document_bytes
@@ -26,24 +25,22 @@ class DocumentProcessingError(RuntimeError):
 
 def list_documents(user_id: str) -> list[dict[str, Any]]:
     with database() as connection:
-        rows = connection.execute(
+        return connection.execute(
             """SELECT id, filename, file_type, size_bytes, status, chunk_count,
                       created_at, error_message
-               FROM documents WHERE user_id = ? ORDER BY created_at DESC""",
+               FROM documents WHERE user_id = %s ORDER BY created_at DESC""",
             (user_id,),
         ).fetchall()
-    return [dict(row) for row in rows]
 
 
 def get_document(user_id: str, document_id: str) -> dict[str, Any] | None:
     with database() as connection:
-        row = connection.execute(
+        return connection.execute(
             """SELECT id, filename, file_type, size_bytes, sha256, status,
                       chunk_count, created_at, error_message
-               FROM documents WHERE id = ? AND user_id = ?""",
+               FROM documents WHERE id = %s AND user_id = %s""",
             (document_id, user_id),
         ).fetchone()
-    return dict(row) if row else None
 
 
 def process_document(
@@ -55,91 +52,81 @@ def process_document(
     started = time.perf_counter()
     filename, file_type = validate_uploaded_file(original_filename, content, declared_content_type)
     digest = hashlib.sha256(content).hexdigest()
-    now = utc_now()
+    document_id = hashlib.sha256(f"{user_id}:{digest}".encode("utf-8")).hexdigest()
+    failure: Exception | None = None
+    message = ""
+
     with database() as connection:
+        connection.execute(
+            """INSERT INTO documents(
+                 id, user_id, filename, file_type, size_bytes, sha256,
+                 status, chunk_count, created_at
+               ) VALUES(%s, %s, %s, %s, %s, %s, 'processing', 0, %s)
+               ON CONFLICT (user_id, sha256) DO NOTHING""",
+            (document_id, user_id, filename, file_type, len(content), digest, utc_now()),
+        )
         existing = connection.execute(
-            "SELECT * FROM documents WHERE user_id = ? AND sha256 = ?",
+            "SELECT * FROM documents WHERE user_id = %s AND sha256 = %s FOR UPDATE",
             (user_id, digest),
         ).fetchone()
-        if existing and existing["status"] == "ready":
-            return dict(existing)
-        if existing:
-            document_id = existing["id"]
-            connection.execute(
-                """UPDATE documents SET filename = ?, status = 'processing',
-                   error_message = NULL WHERE id = ? AND user_id = ?""",
-                (filename, document_id, user_id),
+        if existing is None:
+            raise DocumentProcessingError("The document record was removed. Upload the file again.")
+        if existing["status"] == "ready":
+            return existing
+        document_id = existing["id"]
+
+        try:
+            # Retain the document row on failure, but roll back every chunk from the attempt.
+            with connection.transaction():
+                document = load_document_bytes(content, filename)
+                document["document_id"] = document_id
+                chunks = DocumentChunker(settings.chunk_size, settings.chunk_overlap).chunk_document(
+                    clean_document(document)
+                )
+                if not chunks:
+                    raise DocumentProcessingError("No readable text was found in this document.")
+                embedded_chunks = get_embedding_service().embed_chunks(chunks)
+                get_vector_store().add_chunks(connection, embedded_chunks)
+                result = connection.execute(
+                    """UPDATE documents SET filename = %s, file_type = %s, size_bytes = %s,
+                       status = 'ready', chunk_count = %s, error_message = NULL
+                       WHERE id = %s RETURNING *""",
+                    (filename, file_type, len(content), len(chunks), document_id),
+                ).fetchone()
+        except Exception as exc:
+            failure = exc
+            message = (
+                str(exc) if isinstance(exc, (ValueError, DocumentProcessingError))
+                else "Document processing failed. Check the backend dependencies and model configuration."
             )
-        else:
-            document_id = hashlib.sha256(f"{user_id}:{digest}".encode("utf-8")).hexdigest()
+            logger.exception("Document processing failed for document %s", document_id)
             connection.execute(
-                """INSERT INTO documents(
-                     id, user_id, filename, file_type, size_bytes, sha256,
-                     status, chunk_count, created_at
-                   ) VALUES(?, ?, ?, ?, ?, ?, 'processing', 0, ?)""",
-                (document_id, user_id, filename, file_type, len(content), digest, now),
+                """UPDATE documents SET filename = %s, status = 'failed', error_message = %s
+                   WHERE id = %s""",
+                (filename, message[:500], document_id),
             )
 
-    vector_store = None
-    try:
-        vector_store = get_vector_store()
-        document = load_document_bytes(content, filename)
-        document["document_id"] = document_id
-        document["user_id"] = user_id
-        document = clean_document(document)
-        chunker = DocumentChunker(settings.chunk_size, settings.chunk_overlap)
-        chunks = chunker.chunk_document(document)
-        if not chunks:
-            raise DocumentProcessingError("No readable text was found in this document.")
-        for chunk in chunks:
-            chunk["metadata"]["user_id"] = user_id
-        embedded_chunks = get_embedding_service().embed_chunks(chunks)
-        vector_store.add_chunks(embedded_chunks)
-        with database() as connection:
-            connection.execute(
-                """UPDATE documents SET filename = ?, file_type = ?, size_bytes = ?,
-                   status = 'ready', chunk_count = ?, error_message = NULL
-                   WHERE id = ? AND user_id = ?""",
-                (filename, file_type, len(content), len(chunks), document_id, user_id),
-            )
-    except Exception as exc:
-        try:
-            if vector_store is not None:
-                vector_store.delete_document(document_id, user_id)
-        except Exception:
-            logger.exception("Could not remove partial vector records for a failed upload")
-        message = str(exc) if isinstance(exc, (ValueError, DocumentProcessingError)) else "Document processing failed. Check the backend dependencies and model configuration."
-        logger.exception("Document processing failed for document %s (%s)", document_id, type(exc).__name__)
+    elapsed_ms = round((time.perf_counter() - started) * 1000)
+    if failure is not None:
         logger.info(
             "document status=failed id=%s error_type=%s duration_ms=%s",
-            document_id, type(exc).__name__, round((time.perf_counter() - started) * 1000),
+            document_id, type(failure).__name__, elapsed_ms,
         )
-        with database() as connection:
-            connection.execute(
-                """UPDATE documents SET status = 'failed', error_message = ?
-                   WHERE id = ? AND user_id = ?""",
-                (message[:500], document_id, user_id),
-            )
-        raise DocumentProcessingError(message) from exc
+        raise DocumentProcessingError(message) from failure
 
-    result = get_document(user_id, document_id)
     if result is None:
         raise DocumentProcessingError("The processed document could not be found.")
     logger.info(
         "document status=ready id=%s chunks=%s duration_ms=%s",
-        document_id, result["chunk_count"], round((time.perf_counter() - started) * 1000),
+        document_id, result["chunk_count"], elapsed_ms,
     )
     return result
 
 
 def delete_document(user_id: str, document_id: str) -> bool:
-    record = get_document(user_id, document_id)
-    if record is None:
-        return False
-    get_vector_store().delete_document(document_id, user_id)
     with database() as connection:
-        connection.execute(
-            "DELETE FROM documents WHERE id = ? AND user_id = ?",
+        cursor = connection.execute(
+            "DELETE FROM documents WHERE id = %s AND user_id = %s",
             (document_id, user_id),
         )
-    return True
+        return cursor.rowcount > 0

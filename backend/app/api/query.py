@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from psycopg import Connection
+from psycopg.rows import DictRow
 
 from backend.app.core.config import settings
 from backend.app.core.database import database, utc_now
@@ -120,18 +121,18 @@ def query(payload: QueryRequest, request: Request, user: dict = Depends(get_curr
     return _query_pipeline(payload, user, request_id=getattr(request.state, "request_id", "unknown"))
 
 
-def _owned_conversation(connection: sqlite3.Connection, conversation_id: str, user_id: str):
+def _owned_conversation(connection: Connection[DictRow], conversation_id: str, user_id: str):
     row = connection.execute(
-        "SELECT id, title, created_at, updated_at FROM conversations WHERE id = ? AND user_id = ?",
+        "SELECT id, title, created_at, updated_at FROM conversations WHERE id = %s AND user_id = %s",
         (conversation_id, user_id),
     ).fetchone()
     return row
 
 
-def _history(connection: sqlite3.Connection, conversation_id: str, limit: int = 8) -> list[dict]:
+def _history(connection: Connection[DictRow], conversation_id: str, limit: int = 8) -> list[dict]:
     rows = connection.execute(
-        """SELECT role, content FROM messages WHERE conversation_id = ?
-           ORDER BY created_at DESC LIMIT ?""",
+        """SELECT role, content FROM messages WHERE conversation_id = %s
+           ORDER BY created_at DESC LIMIT %s""",
         (conversation_id, limit),
     ).fetchall()
     return [dict(row) for row in reversed(rows)]
@@ -148,7 +149,7 @@ def chat(payload: ChatRequest, request: Request, user: dict = Depends(get_curren
         if existing is None:
             connection.execute(
                 """INSERT INTO conversations(id, user_id, title, created_at, updated_at)
-                   VALUES(?, ?, ?, ?, ?)""",
+                   VALUES(%s, %s, %s, %s, %s)""",
                 (conversation_id, user["id"], payload.question[:80], now, now),
             )
             history: list[dict] = []
@@ -162,19 +163,19 @@ def chat(payload: ChatRequest, request: Request, user: dict = Depends(get_curren
     with database() as connection:
         connection.execute(
             """INSERT INTO messages(id, conversation_id, role, content, sources_json, created_at)
-               VALUES(?, ?, 'user', ?, '[]', ?)""",
+               VALUES(%s, %s, 'user', %s, '[]', %s)""",
             (str(uuid.uuid4()), conversation_id, payload.question, now),
         )
         connection.execute(
             """INSERT INTO messages(id, conversation_id, role, content, sources_json, created_at)
-               VALUES(?, ?, 'assistant', ?, ?, ?)""",
+               VALUES(%s, %s, 'assistant', %s, %s, %s)""",
             (
                 str(uuid.uuid4()), conversation_id, result["answer"],
                 json.dumps(result["sources"], ensure_ascii=False), utc_now(),
             ),
         )
         connection.execute(
-            "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?",
+            "UPDATE conversations SET updated_at = %s WHERE id = %s AND user_id = %s",
             (utc_now(), conversation_id, user["id"]),
         )
     return result
@@ -187,7 +188,7 @@ def get_conversations(user: dict = Depends(get_current_user)) -> list[dict]:
             """SELECT c.id, c.title, c.created_at, c.updated_at,
                       COUNT(m.id) AS message_count
                FROM conversations c LEFT JOIN messages m ON m.conversation_id = c.id
-               WHERE c.user_id = ? GROUP BY c.id
+               WHERE c.user_id = %s GROUP BY c.id
                ORDER BY c.updated_at DESC LIMIT 100""",
             (user["id"],),
         ).fetchall()
@@ -202,7 +203,7 @@ def get_conversation(conversation_id: str, user: dict = Depends(get_current_user
             raise HTTPException(status_code=404, detail="Conversation not found.")
         messages = connection.execute(
             """SELECT id, role, content, sources_json, created_at FROM messages
-               WHERE conversation_id = ? ORDER BY created_at""",
+               WHERE conversation_id = %s ORDER BY created_at""",
             (conversation_id,),
         ).fetchall()
     return {
@@ -225,7 +226,7 @@ def get_conversation(conversation_id: str, user: dict = Depends(get_current_user
 def delete_conversation(conversation_id: str, user: dict = Depends(get_current_user)) -> None:
     with database() as connection:
         cursor = connection.execute(
-            "DELETE FROM conversations WHERE id = ? AND user_id = ?",
+            "DELETE FROM conversations WHERE id = %s AND user_id = %s",
             (conversation_id, user["id"]),
         )
         if cursor.rowcount == 0:

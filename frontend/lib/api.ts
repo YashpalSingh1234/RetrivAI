@@ -40,9 +40,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!response.ok) {
     let message = `Request failed (${response.status}).`;
     try {
-      const body = await response.json();
-      if (typeof body.detail === "string") message = body.detail;
-      else if (Array.isArray(body.detail)) message = body.detail.map((item) => item.msg).join(" ");
+      const detail: unknown = (await response.json()).detail;
+      if (typeof detail === "string") message = detail;
+      else if (Array.isArray(detail)) message = detail.map((item) => item.msg).join(" ");
     } catch {
       // Keep the concise status message when the server did not return JSON.
     }

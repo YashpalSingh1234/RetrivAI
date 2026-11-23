@@ -64,7 +64,7 @@ export function DocumentUpload({ onUploaded }: { onUploaded: (document: Document
       </button>
       {error && <p className="inline-error upload-feedback" role="alert">{error}</p>}
       {message && <p className="inline-success upload-feedback" role="status">{message}</p>}
-      <p className="upload-hint">Your files are scoped to your account. When configured, only retrieved excerpts are sent to your LLM provider.</p>
+      <p className="upload-hint">Files are private to your account. If you connect an AI provider, it receives only the excerpts used to answer your question.</p>
     </div>
   );
 }

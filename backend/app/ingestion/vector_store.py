@@ -1,83 +1,93 @@
-"""Persistent Chroma vector storage with owner-scoped retrieval."""
+"""Document passages and cosine retrieval backed by PostgreSQL and pgvector."""
 
 from __future__ import annotations
 
-from pathlib import Path
+import json
 
-import chromadb
 import numpy as np
+from psycopg import Connection
+from psycopg.rows import DictRow
 
 from backend.app.core.config import settings
 
 
-class VectorStore:
-    def __init__(
-        self,
-        persist_directory: str | Path = settings.vector_db_path,
-        collection_name: str = "rag_documents",
-    ) -> None:
-        path = Path(persist_directory)
-        path.mkdir(parents=True, exist_ok=True)
-        self.client = chromadb.PersistentClient(path=str(path))
-        self.collection = self.client.get_or_create_collection(
-            name=collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
+def _vector_parameter(values: np.ndarray | list[float]) -> str:
+    vector = np.asarray(values, dtype=np.float32)
+    if vector.shape != (settings.embedding_dimension,):
+        raise ValueError(f"Expected {settings.embedding_dimension} embedding dimensions.")
+    if not vector.any():
+        raise ValueError("Cosine similarity requires a nonzero embedding.")
+    return json.dumps(vector.tolist(), allow_nan=False, separators=(",", ":"))
 
-    def add_chunks(self, chunks: list[dict], batch_size: int = 100) -> int:
+
+class VectorStore:
+    def add_chunks(
+        self, connection: Connection[DictRow], chunks: list[dict], batch_size: int = 100
+    ) -> int:
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
-        if not chunks:
-            return 0
-        for start in range(0, len(chunks), batch_size):
-            batch = chunks[start:start + batch_size]
-            self.collection.upsert(
-                ids=[chunk["chunk_id"] for chunk in batch],
-                documents=[chunk["text"] for chunk in batch],
-                embeddings=[chunk["embedding"] for chunk in batch],
-                metadatas=[chunk["metadata"] for chunk in batch],
-            )
+        with connection.cursor() as cursor:
+            for start in range(0, len(chunks), batch_size):
+                batch = chunks[start:start + batch_size]
+                cursor.executemany(
+                    """
+                    INSERT INTO document_chunks(
+                        id, document_id, content, source, page_number, chunk_index, embedding
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s::vector)
+                    ON CONFLICT (id) DO UPDATE SET
+                        content = EXCLUDED.content,
+                        source = EXCLUDED.source,
+                        page_number = EXCLUDED.page_number,
+                        chunk_index = EXCLUDED.chunk_index,
+                        embedding = EXCLUDED.embedding
+                    """,
+                    [
+                        (
+                            chunk["chunk_id"], chunk["metadata"]["document_id"], chunk["text"],
+                            chunk["metadata"]["source"], chunk["metadata"].get("page_number"),
+                            chunk["metadata"].get("chunk_index"), _vector_parameter(chunk["embedding"]),
+                        )
+                        for chunk in batch
+                    ],
+                )
         return len(chunks)
 
     def search(
         self,
+        connection: Connection[DictRow],
         query_embedding: np.ndarray,
+        *,
+        user_id: str,
         top_k: int = 5,
-        where: dict | None = None,
+        document_ids: list[str] | None = None,
     ) -> list[dict]:
         if top_k <= 0:
             raise ValueError("top_k must be positive")
-        if self.collection.count() == 0:
-            return []
-        query_vector = np.asarray(query_embedding, dtype=np.float32)
-        if query_vector.ndim != 1:
-            raise ValueError("Query embedding must be a 1D vector")
-        response = self.collection.query(
-            query_embeddings=[query_vector.tolist()],
-            n_results=min(top_k, self.collection.count()),
-            where=where,
-            include=["documents", "metadatas", "distances"],
-        )
-        matches = []
-        for chunk_id, text, metadata, distance in zip(
-            response["ids"][0],
-            response["documents"][0],
-            response["metadatas"][0],
-            response["distances"][0],
-        ):
-            matches.append({
-                "chunk_id": chunk_id,
-                "text": text,
-                "metadata": metadata,
-                "distance": float(distance),
-            })
-        return matches
-
-    def delete_document(self, document_id: str, user_id: str | None = None) -> None:
-        where = {"document_id": document_id}
-        if user_id:
-            where = {"$and": [{"document_id": document_id}, {"user_id": user_id}]}
-        self.collection.delete(where=where)
-
-    def count(self, where: dict | None = None) -> int:
-        return self.collection.count(where=where)
+        rows = connection.execute(
+            """
+            SELECT c.id, c.content, c.source, c.document_id, c.page_number, c.chunk_index,
+                   c.embedding <=> %s::vector AS distance
+            FROM document_chunks c
+            JOIN documents d ON d.id = c.document_id
+            WHERE d.user_id = %s AND d.status = 'ready'
+              AND (%s::text[] IS NULL OR c.document_id = ANY(%s::text[]))
+            ORDER BY distance, c.id
+            LIMIT %s
+            """,
+            (_vector_parameter(query_embedding), user_id, document_ids, document_ids, top_k),
+        ).fetchall()
+        return [
+            {
+                "chunk_id": row["id"],
+                "text": row["content"],
+                "metadata": {
+                    "user_id": user_id,
+                    "document_id": row["document_id"],
+                    "source": row["source"],
+                    "page_number": row["page_number"],
+                    "chunk_index": row["chunk_index"],
+                },
+                "distance": float(row["distance"]),
+            }
+            for row in rows
+        ]

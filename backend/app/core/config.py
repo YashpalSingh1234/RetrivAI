@@ -12,11 +12,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-def _path_setting(name: str, default: str) -> Path:
-    path = Path(os.getenv(name, default)).expanduser()
-    return path if path.is_absolute() else PROJECT_ROOT / path
-
-
 def _csv_setting(name: str, default: str) -> list[str]:
     return [value.strip() for value in os.getenv(name, default).split(",") if value.strip()]
 
@@ -25,8 +20,8 @@ class Settings:
     app_name = os.getenv("APP_NAME", "RetrivAI")
     environment = os.getenv("APP_ENV", "development")
     debug = os.getenv("APP_DEBUG", "false").lower() in {"1", "true", "yes"}
-    database_path = _path_setting("DATABASE_PATH", "data/retrivai.sqlite3")
-    vector_db_path = _path_setting("VECTOR_DB_PATH", "data/chroma_df")
+    database_url = os.getenv("DATABASE_URL", "")
+    embedding_dimension = int(os.getenv("EMBEDDING_DIMENSION", "768"))
     embedding_model = os.getenv(
         "EMBEDDING_MODEL", "sentence-transformers/all-mpnet-base-v2"
     )

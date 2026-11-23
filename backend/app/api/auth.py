@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import sqlite3
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from psycopg.errors import UniqueViolation
 
 from backend.app.core.auth import authenticate_user, create_user, issue_session
 from backend.app.core.config import settings
@@ -32,7 +31,7 @@ def _set_session(response: Response, user_id: str) -> None:
 def register(payload: AuthRequest, response: Response) -> dict:
     try:
         user = create_user(payload.email, payload.password)
-    except sqlite3.IntegrityError as exc:
+    except UniqueViolation as exc:
         raise HTTPException(status_code=409, detail="An account with this email already exists.") from exc
     _set_session(response, user["id"])
     return user

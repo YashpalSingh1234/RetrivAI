@@ -1,0 +1,2 @@
+# Required only by the one-time SQLite and Chroma import.
+chromadb>=1.5.9,<2.0

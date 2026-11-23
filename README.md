@@ -6,22 +6,22 @@ RetrivAI is a private, document-grounded question-answering workspace. Upload PD
 
 - Creates an account and isolates documents and conversations by account.
 - Validates uploads and extracts page-aware text where the format supports it.
-- Cleans and splits text into overlapping chunks, then embeds and stores them in Chroma.
+- Cleans and splits text into overlapping chunks, then stores text and embeddings in PostgreSQL with pgvector.
 - Searches the signed-in user's documents and optionally reranks candidates with a cross-encoder.
 - Answers from retrieved context, displays source passages, and declines when retrieval is too weak.
 - Uses an OpenAI-compatible chat completions API when configured. With no API key, it returns a clearly labeled extractive answer so the local app still works.
-- Stores users, document status, and chat history in SQLite.
+- Stores users, document status, and chat history in the same PostgreSQL database.
 - Includes retrieval metrics, generation quality heuristics, and a small manually checked sample dataset.
 
 ## Architecture
 
 ```text
-Upload → validate → extract → clean → chunk → embed → Chroma
+Upload → validate → extract → clean → chunk → embed → PostgreSQL + pgvector
 Question → embed → account-scoped search → cross-encoder rerank
          → cited context → LLM or extractive fallback → answer + sources
 ```
 
-FastAPI coordinates the backend workflows. Chroma stores vectors and passage metadata; SQLite stores account, document, and conversation records. The Next.js frontend talks to FastAPI using an HTTP-only session cookie.
+FastAPI coordinates the backend workflows. PostgreSQL stores account records, chat history, and source passages. pgvector ranks passages by cosine distance after scoping them to the signed-in account. The Next.js frontend talks to FastAPI using an HTTP-only session cookie.
 
 See [RetrivAI_Doc.md](docs/RetrivAI_Doc.md) for the product specification and [RetrivAI_CODE_MAP.md](docs/RetrivAI_CODE_MAP.md) for module responsibilities.
 
@@ -40,6 +40,10 @@ Copy-Item .env.example .env
 ```
 
 On macOS or Linux, create/activate the virtual environment with `python3 -m venv .venv` and `source .venv/bin/activate`, then copy `.env.example` to `.env`.
+
+Use an empty PostgreSQL database on a server with [pgvector installed](https://github.com/pgvector/pgvector#installation). Set `DATABASE_URL` in the root `.env` to the real connection string. An administrator can run `CREATE EXTENSION IF NOT EXISTS vector;` in that database if the app role cannot create extensions.
+
+For a Docker-managed database with the backend running on your host, run `docker compose up -d db` and use port `5433` in `DATABASE_URL`. For existing SQLite and Chroma data, run the import below before opening the app against the new database.
 
 Start the API from the repository root:
 
@@ -84,9 +88,10 @@ The root `.env.example` documents the settings. Common options:
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `DATABASE_PATH` | `data/retrivai.sqlite3` | SQLite application metadata |
-| `VECTOR_DB_PATH` | `data/chroma_df` | Persistent Chroma collection |
+| `DATABASE_URL` | Set in `.env` | PostgreSQL connection string for the host backend |
+| `POSTGRES_PASSWORD` | `retrivai` for local Compose | Password for the Compose database |
 | `EMBEDDING_MODEL` | `sentence-transformers/all-mpnet-base-v2` | Shared query/document embedding model |
+| `EMBEDDING_DIMENSION` | `768` | Vector size for the configured model and database schema |
 | `RERANKER_ENABLED` | `true` | Enable cross-encoder reranking |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1000` / `200` | Chunk configuration in characters |
 | `DEFAULT_TOP_K` / `MAX_TOP_K` | `5` / `20` | Retrieval response limits |
@@ -95,7 +100,20 @@ The root `.env.example` documents the settings. Common options:
 | `FRONTEND_URLS` | local Next.js origins | Exact CORS origins allowed to send session cookies |
 | `COOKIE_SECURE` | `false` | Set `true` when serving over HTTPS |
 
-The first account is created from the frontend. Passwords are stored as PBKDF2 hashes; the browser receives an HTTP-only signed session cookie. SQLite and Chroma data are local files and should be backed up together.
+The first account is created from the frontend. Passwords are stored as PBKDF2 hashes. The browser receives an HTTP-only signed session cookie. Back up the PostgreSQL database, including the `document_chunks` table.
+
+## Import an existing SQLite and Chroma workspace
+
+Stop the old backend so the files represent one consistent snapshot. Set `DATABASE_URL` to the empty PostgreSQL target and keep the embedding model and dimensions used by the original workspace. From the project root with the Python environment active:
+
+```bash
+python -m pip install -r backend/requirements-migration.txt
+python -m backend.app.core.migrate_legacy
+```
+
+The default sources are `data/retrivai.sqlite3` and `data/chroma_df`. Pass `--sqlite PATH` and `--chroma PATH` for other locations. The import preserves accounts, password hashes, the session signing secret, document IDs, chat history, and indexed passages with their existing embeddings. It validates ready-document passage counts, commits the import together, and leaves the source files in place. Unowned sample passages are skipped. An upload that was interrupted before cutover can be retried.
+
+After the import succeeds, start the new backend and check the document list, an existing chat, and a cited answer.
 
 ## API overview
 
@@ -127,7 +145,7 @@ The small dataset in `backend/app/evaluation/dataset.jsonl` is grounded in the b
 python -m backend.app.evaluation.run_dataset --top-k 5
 ```
 
-The script indexes that sample PDF under a separate `evaluation` owner in the local Chroma collection, then reports Precision@K, Recall@K, and MRR. Add `--with-reranker` to compare vector-only results with cross-encoder reranking. Add questions and verified relevant page/text labels to compare chunk and top-K configurations.
+The script indexes the sample PDF in a PostgreSQL test transaction and reports Precision@K, Recall@K, and MRR. The sample rows are rolled back after evaluation. Add `--with-reranker` to compare vector-only results with cross-encoder reranking. Add questions and verified relevant page/text labels to compare chunk and top-K configurations.
 
 The generation endpoint reports lexical proxies for faithfulness, context relevance, answer relevance, and citation correctness. Token overlap cannot establish entailment, so these values are indicators for manual review, not proof that an answer is faithful.
 
@@ -139,14 +157,14 @@ Copy `.env.example` to `.env`, set `COOKIE_SECURE=false` for local HTTP, then ru
 docker compose up --build
 ```
 
-This starts the API on port 8000 and the web app on port 3000. Persistent SQLite, Chroma, and model cache data live under `data/`. For a public HTTPS deployment, configure a strong origin list and set `COOKIE_SECURE=true`. If the frontend and API are on different sites, also set `COOKIE_SAMESITE=none`. Use persistent, private database/vector volumes and review the hosting provider's resource limits for the embedding and reranker models. Cloud deployment still requires your hosting account and service configuration.
+This starts PostgreSQL with pgvector, the API on port 8000, and the web app on port 3000. PostgreSQL uses the `postgres-data` volume and is reachable from the host at `127.0.0.1:5433`. Model cache files live under `data/`. For a public HTTPS deployment, configure the PostgreSQL credentials and allowed frontend origins, and set `COOKIE_SECURE=true`. If the frontend and API are on different sites, set `COOKIE_SAMESITE=none`.
 
 ## Project structure
 
 ```text
 backend/app/api/          FastAPI routes
-backend/app/core/         Configuration, SQLite, auth, dependencies
-backend/app/ingestion/    Loaders, cleaning, chunking, embeddings, Chroma
+backend/app/core/         Configuration, PostgreSQL schema, auth, dependencies
+backend/app/ingestion/    Loaders, cleaning, chunking, embeddings, pgvector
 backend/app/retrieval/    Retrieval, reranking, context and citations
 backend/app/generation/   Grounded prompts and LLM integration
 backend/app/evaluation/   Retrieval/generation metrics and sample dataset

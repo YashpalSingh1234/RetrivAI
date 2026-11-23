@@ -1,13 +1,15 @@
-"""SQLite persistence for accounts, documents, conversations, and messages."""
+"""PostgreSQL persistence for application records and pgvector passages."""
 
 from __future__ import annotations
 
 import secrets
-import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Iterator
+
+import psycopg
+from psycopg import Connection, sql
+from psycopg.rows import DictRow, dict_row
 
 from backend.app.core.config import settings
 
@@ -16,31 +18,21 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def connect() -> sqlite3.Connection:
-    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(settings.database_path, timeout=30)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    connection.execute("PRAGMA journal_mode = WAL")
-    return connection
-
-
 @contextmanager
-def database() -> Iterator[sqlite3.Connection]:
-    connection = connect()
-    try:
+def database() -> Iterator[Connection[DictRow]]:
+    with psycopg.connect(settings.database_url, row_factory=dict_row, connect_timeout=5) as connection:
         yield connection
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
 
 
 def initialize_database() -> None:
+    dimension = settings.embedding_dimension
+    if not 1 <= dimension <= 16_000:
+        raise ValueError("EMBEDDING_DIMENSION must be between 1 and 16000.")
     with database() as connection:
-        connection.executescript(
+        # Serialize schema creation when multiple API workers start together.
+        connection.execute("SELECT pg_advisory_xact_lock(1744089514)")
+        connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        connection.execute(
             """
             CREATE TABLE IF NOT EXISTS app_meta (
                 key TEXT PRIMARY KEY,
@@ -48,7 +40,7 @@ def initialize_database() -> None:
             );
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
-                email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
@@ -57,7 +49,7 @@ def initialize_database() -> None:
                 user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 filename TEXT NOT NULL,
                 file_type TEXT NOT NULL,
-                size_bytes INTEGER NOT NULL,
+                size_bytes BIGINT NOT NULL,
                 sha256 TEXT NOT NULL,
                 status TEXT NOT NULL,
                 chunk_count INTEGER NOT NULL DEFAULT 0,
@@ -89,7 +81,30 @@ def initialize_database() -> None:
             """
         )
         connection.execute(
-            "INSERT OR IGNORE INTO app_meta(key, value) VALUES('auth_secret', ?)",
+            sql.SQL(
+                """
+                CREATE TABLE IF NOT EXISTS document_chunks (
+                    id TEXT PRIMARY KEY,
+                    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+                    content TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    page_number INTEGER,
+                    chunk_index INTEGER,
+                    embedding vector({}) NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS document_chunks_document
+                    ON document_chunks(document_id);
+                """
+            ).format(sql.Literal(dimension))
+        )
+        stored = connection.execute(
+            """SELECT atttypmod FROM pg_attribute
+               WHERE attrelid = 'document_chunks'::regclass AND attname = 'embedding'"""
+        ).fetchone()
+        if stored is None or stored["atttypmod"] != dimension:
+            raise ValueError("EMBEDDING_DIMENSION must match the existing document_chunks schema.")
+        connection.execute(
+            "INSERT INTO app_meta(key, value) VALUES('auth_secret', %s) ON CONFLICT (key) DO NOTHING",
             (secrets.token_urlsafe(48),),
         )
 
@@ -100,10 +115,5 @@ def get_auth_secret() -> bytes:
             "SELECT value FROM app_meta WHERE key = 'auth_secret'"
         ).fetchone()
         if row is None:
-            secret = secrets.token_urlsafe(48)
-            connection.execute(
-                "INSERT INTO app_meta(key, value) VALUES('auth_secret', ?)",
-                (secret,),
-            )
-            return secret.encode("utf-8")
+            raise RuntimeError("The database has not been initialized.")
         return str(row["value"]).encode("utf-8")

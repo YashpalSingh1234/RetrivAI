@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from backend.app.core.database import database
 from backend.app.ingestion.embeddings import EmbeddingService
 from backend.app.ingestion.vector_store import VectorStore
 
@@ -23,15 +24,10 @@ class Retriever:
         document_ids: list[str] | None = None,
     ) -> list[dict]:
         query_vector = self.embedding_service.embed_query(question)
-        where: dict = {"user_id": user_id}
-        if document_ids:
-            where = {
-                "$and": [
-                    {"user_id": user_id},
-                    {"document_id": {"$in": document_ids}},
-                ]
-            }
-        results = self.vector_store.search(query_vector, top_k=top_k, where=where)
+        with database() as connection:
+            results = self.vector_store.search(
+                connection, query_vector, user_id=user_id, top_k=top_k, document_ids=document_ids
+            )
         for item in results:
             item["relevance_score"] = max(0.0, min(1.0, 1.0 - item["distance"]))
         return results

@@ -155,7 +155,7 @@ export function ChatWindow() {
     <section className="chat-layout">
       <aside className="chat-history panel">
         <div className="history-topline">
-          <div><span className="eyebrow">YOUR THREADS</span><h3>Conversations</h3></div>
+          <h2>Chat history</h2>
           <button className="icon-button add-chat" type="button" onClick={startNewConversation} title="Start a new chat" aria-label="Start a new chat">＋</button>
         </div>
         <div className="conversation-list">
@@ -174,16 +174,15 @@ export function ChatWindow() {
 
       <div className="chat-main panel">
         <div className="chat-topbar">
-          <div><span className="eyebrow">DOCUMENT Q&A</span><h2>{conversationId ? "Keep exploring" : "Ask your documents"}</h2></div>
-          <button className="button button-quiet new-chat-button" type="button" onClick={startNewConversation}>＋ New chat</button>
+          <h2>{conversationId ? "Conversation" : "New conversation"}</h2>
+          <button className="button button-quiet" type="button" onClick={startNewConversation}>New chat</button>
         </div>
         <div className={`message-area ${messages.length === 0 ? "empty" : ""}`} aria-live="polite">
           {messages.length === 0 ? (
             <div className="chat-empty-content">
               <div className="chat-orbit" aria-hidden="true"><span>R</span><i /><b /></div>
-              <span className="eyebrow">GROUNDED IN YOUR LIBRARY</span>
               <h3>What would you like to know?</h3>
-              <p>Ask a question in plain language. RetrivAI searches your documents and shows the passages behind its answer.</p>
+              <p>Type a question below, or start with one of these examples.</p>
               <div className="suggestion-list">
                 {suggestions.map((suggestion) => (
                   <button type="button" key={suggestion} onClick={() => setQuestion(suggestion)}>{suggestion}<span aria-hidden="true">↗</span></button>
@@ -199,7 +198,7 @@ export function ChatWindow() {
                     <div className="message-meta">
                       <strong>{message.role === "user" ? "You" : "RetrivAI"}</strong>
                       <time>{timestamp(message.created_at)}</time>
-                      {message.generation_mode === "extractive" && <span className="mode-tag">EXTRACTIVE</span>}
+                      {message.generation_mode === "extractive" && <span className="mode-tag">Source excerpts</span>}
                     </div>
                     {message.role === "assistant" ? <AnswerText text={message.content} /> : <p>{message.content}</p>}
                     {message.warning && <div className="notice notice-soft">{message.warning}</div>}
@@ -225,8 +224,8 @@ export function ChatWindow() {
             disabled={busy}
           />
           <div className="composer-bottom">
-            <span>Answers use your indexed documents and include source passages.</span>
-            <button className="send-button" type="submit" disabled={busy || question.trim().length < 2} aria-label="Send question">{busy ? <span className="spinner" /> : "↑"}</button>
+            <span>Enter to send · Shift + Enter for a new line</span>
+            <button className="button button-primary" type="submit" disabled={busy || question.trim().length < 2} aria-label="Send question">{busy ? <span className="spinner" /> : "Send"}</button>
           </div>
         </form>
       </div>
