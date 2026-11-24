@@ -68,7 +68,7 @@ Root ki local `.env` file active `DATABASE_URL`, LLM credentials aur doosri mach
 | File | Kya kaam karti hai |
 | --- | --- |
 | [`backend/app/generation/prompts.py`](../backend/app/generation/prompts.py) | `build_messages()` question, selected evidence aur bounded recent history se model messages banata hai. System instructions answer ko supplied passages aur unke citation labels tak ground karne ko kehti hain. |
-| [`backend/app/generation/llm.py`](../backend/app/generation/llm.py) | Configured OpenAI-compatible `/chat/completions` endpoint ko call karti hai. Model/key unavailable ho to source sentences se extractive answer banati hai. Evidence unavailable ho to insufficient-context response deti hai. |
+| [`backend/app/generation/llm.py`](../backend/app/generation/llm.py) | Configured OpenAI-compatible `/chat/completions` endpoint ko call karti hai, jaise local Ollama par Qwen 3.5. Generated answer ke citation labels verify karti hai. Model unavailable ho ya citations invalid hon to source sentences se extractive answer banati hai. |
 | [`backend/app/evaluation/retrieval.py`](../backend/app/evaluation/retrieval.py) | Precision@K, Recall@K aur reciprocal rank calculate karti hai. Input expected relevant passage IDs aur retrieval ka ordered result hota hai. |
 | [`backend/app/evaluation/generation.py`](../backend/app/evaluation/generation.py) | Answer, context, question aur optional expected text ke word overlap se quality signals calculate karti hai. Citation IDs ko available IDs se compare karti hai. Ye scores approximate indicators hain. |
 | [`backend/app/evaluation/run_dataset.py`](../backend/app/evaluation/run_dataset.py) | Sample PDF aur labeled questions se retrieval benchmark chalati hai. Temporary PostgreSQL transaction mein sample index karti hai, vector aur optional reranked results score karti hai, summary JSON print karti hai aur sample rows rollback karti hai. |
@@ -144,4 +144,5 @@ Vector benchmark ke liye PostgreSQL mein pgvector available hona chahiye, `DATAB
 - `data/postgres_local/` local Windows PostgreSQL instance ke program files, database cluster aur logs ki jagah hai. Docker setup database ke liye `postgres-data` volume use karta hai.
 - `data/retrivai.sqlite3` aur purana `data/chroma_df/` legacy import ke expected source paths hain. Alternate backup paths migration CLI ke `--sqlite` aur `--chroma` flags se pass hote hain.
 - `data/hf_cache/` container setup mein downloaded embedding aur reranker model files ki cache hai.
+- `data/ollama/` portable Ollama runtime aur local Qwen model files ki jagah hai.
 - `__pycache__/` aur `*.pyc` Python bytecode cache hain. `RetrivAI_Venv/` installed Python environment hai. `frontend/.next/` generated routes aur build output rakhta hai, aur `frontend/node_modules/` npm packages rakhta hai.

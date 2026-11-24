@@ -35,6 +35,7 @@ class Settings:
     llm_base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
     llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini").strip()
     llm_timeout_seconds = float(os.getenv("LLM_TIMEOUT_SECONDS", "45"))
+    llm_reasoning_effort = os.getenv("LLM_REASONING_EFFORT", "").strip()
     allowed_origins = _csv_setting(
         "FRONTEND_URLS", "http://localhost:3000,http://127.0.0.1:3000"
     )

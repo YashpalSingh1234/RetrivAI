@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 
 from backend.app.core.config import settings
-from backend.app.generation.prompts import build_messages
+from backend.app.generation.prompts import INSUFFICIENT_ANSWER, build_messages
 
 
 class LLMError(RuntimeError):
@@ -18,15 +18,17 @@ class LLMError(RuntimeError):
 def _completion(messages: list[dict[str, str]]) -> str:
     if not settings.llm_api_key:
         raise LLMError("No LLM API key is configured.")
-    payload = json.dumps({
+    payload = {
         "model": settings.llm_model,
         "messages": messages,
         "temperature": 0.1,
         "max_tokens": 700,
-    }).encode("utf-8")
+    }
+    if settings.llm_reasoning_effort:
+        payload["reasoning_effort"] = settings.llm_reasoning_effort
     request = urllib.request.Request(
         f"{settings.llm_base_url}/chat/completions",
-        data=payload,
+        data=json.dumps(payload).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {settings.llm_api_key}",
             "Content-Type": "application/json",
@@ -45,7 +47,10 @@ def _completion(messages: list[dict[str, str]]) -> str:
         raise LLMError("The configured language model request failed.") from exc
 
     try:
-        content = body["choices"][0]["message"]["content"]
+        choice = body["choices"][0]
+        if choice.get("finish_reason") == "length":
+            raise LLMError("The language model reached its answer length limit.")
+        content = choice["message"]["content"]
         if isinstance(content, list):
             content = "\n".join(
                 part.get("text", "") for part in content if isinstance(part, dict)
@@ -53,7 +58,7 @@ def _completion(messages: list[dict[str, str]]) -> str:
         if not isinstance(content, str) or not content.strip():
             raise ValueError("Empty response")
         return content.strip()
-    except (KeyError, IndexError, TypeError, ValueError) as exc:
+    except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
         raise LLMError("The language model returned an unexpected response.") from exc
 
 
@@ -100,14 +105,17 @@ def generate_answer(
     history: list[dict] | None = None,
 ) -> tuple[str, str, str | None]:
     if not sources:
-        return (
-            "I couldn't find enough information in your documents to answer that question.",
-            "insufficient_context",
-            None,
-        )
+        return INSUFFICIENT_ANSWER, "insufficient_context", None
     try:
         messages = build_messages(question, sources, history)
-        return _completion(messages), "llm", None
+        answer = _completion(messages)
+        if answer == INSUFFICIENT_ANSWER:
+            return answer, "insufficient_context", None
+        cited = set(re.findall(r"\[(S\d+)\]", answer))
+        available = {source["citation_id"] for source in sources}
+        if not cited or not cited <= available:
+            raise LLMError("The language model did not cite valid source passages.")
+        return answer, "llm", None
     except LLMError as exc:
         warning = (
             "LLM_API_KEY is not configured; showing an extractive answer."

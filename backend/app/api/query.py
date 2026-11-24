@@ -16,6 +16,7 @@ from backend.app.core.database import database, utc_now
 from backend.app.core.dependencies import check_rate_limit, get_current_user
 from backend.app.core.services import get_reranker, get_retriever
 from backend.app.generation.llm import generate_answer
+from backend.app.generation.prompts import INSUFFICIENT_ANSWER
 from backend.app.models.schemas import (
     ChatRequest,
     ConversationDetail,
@@ -29,7 +30,6 @@ from backend.app.services.documents import list_documents
 
 router = APIRouter(tags=["query", "chat"], dependencies=[Depends(check_rate_limit)])
 logger = logging.getLogger(__name__)
-INSUFFICIENT_ANSWER = "I couldn't find enough information in your documents to answer that question."
 
 
 def _query_pipeline(

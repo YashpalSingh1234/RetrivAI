@@ -70,9 +70,38 @@ npm run dev
 
 Open `http://localhost:3000`, create an account, and upload a document. The embedding and reranker model weights are downloaded the first time they are needed, so the first indexing or question may take longer.
 
-### 3. Configure answer generation (optional)
+### 3. Configure answer generation with Qwen 3.5
 
-The app works without a model API key using extractive answers. For generated answers, set these in the root `.env`:
+Start [Ollama](https://ollama.com/download), then download the local 4B model:
+
+```powershell
+ollama pull qwen3.5:4b
+```
+
+Set these values in the root `.env` and restart the backend:
+
+```dotenv
+LLM_API_KEY=ollama
+LLM_BASE_URL=http://127.0.0.1:11434/v1
+LLM_MODEL=qwen3.5:4b
+LLM_REASONING_EFFORT=none
+LLM_TIMEOUT_SECONDS=180
+```
+
+`ollama` is a placeholder key accepted by the local runtime. The API sends the question, selected passages, and bounded chat history to that local endpoint. For a portable Windows setup, start the project copy from the repository root using:
+
+```powershell
+$env:OLLAMA_MODELS = Join-Path (Get-Location).Path 'data\ollama\models'
+$env:OLLAMA_HOST = '127.0.0.1:11434'
+$env:OLLAMA_CONTEXT_LENGTH = '8192'
+$env:OLLAMA_NUM_PARALLEL = '1'
+$env:OLLAMA_NO_CLOUD = '1'
+& '.\data\ollama\runtime\ollama.exe' serve
+```
+
+The app uses source excerpts when the model is unavailable or returns an answer without valid citations.
+
+For another OpenAI-compatible provider, set its endpoint, model and key in the root `.env`, and leave `LLM_REASONING_EFFORT` empty unless that provider supports it:
 
 ```dotenv
 LLM_API_KEY=your-provider-key
@@ -80,7 +109,7 @@ LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=gpt-4o-mini
 ```
 
-`LLM_BASE_URL` must expose an OpenAI-compatible `/chat/completions` endpoint. The key stays on the backend. When generation is enabled, retrieved excerpts and the current question are sent to that provider; uploaded files and full documents are not sent as a whole.
+`LLM_BASE_URL` must expose an OpenAI-compatible `/chat/completions` endpoint. The key stays on the backend. For Docker, use an endpoint reachable from the backend container.
 
 ## Configuration
 
